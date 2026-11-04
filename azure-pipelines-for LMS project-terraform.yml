@@ -1,0 +1,189 @@
+pool: LMS Infra
+
+trigger:
+- main
+- feature/*
+
+parameters:
+
+  - name: enviornment
+    displayName: Select enviornment
+    type: string
+    default: preprod
+    values:
+      - prod
+      - preprod
+
+  - name: scangitleaks
+    displayName: scan gitleaks
+    type: boolean
+    default: true
+
+  - name: runtrivy
+    displayName: runtrivy
+    type: boolean
+    default: true
+
+  - name: initvalidate
+    displayName: init_validate
+    type: boolean
+    default: true
+
+  - name: runplan
+    displayName: plan
+    type: boolean
+    default: true
+
+  - name: manualapproval
+    displayName: manualapproval
+    type: boolean
+    default: true
+
+  - name: runapply
+    displayName: run_apply
+    type: boolean
+    default: true
+
+variables:
+  workingDirectory: '$(System.DefaultWorkingDirectory)/enviornment/${{ parameters.enviornment }}'
+
+stages:
+  - stage: gitleaks
+    dependsOn: []
+    condition: ${{ parameters.scangitleaks }}
+    displayName: gitleaks
+    jobs:
+      - job: gitleaks
+        displayName: gitleaks
+        steps:
+        - task: PowerShell@2
+          inputs:
+            targetType: 'inline'
+            script: |
+              Write-Host "===== Gitleaks Scan ====="
+                              gitleaks detect `
+                                --source "$(Build.SourcesDirectory)" `
+                                --no-banner `
+                                --verbose `
+                                --exit-code 0
+                              Write-Host "===== Gitleaks Scan Completed ====="
+
+  - stage: trivy
+    dependsOn: []
+    displayName: trivy
+    condition: ${{ parameters.runtrivy }}
+    jobs:
+      - job: trivy
+        displayName: trivy
+        steps:
+        - task: PowerShell@2
+          inputs:
+            targetType: 'inline'
+            script: |
+              Write-Host "Starting Trivy Terraform Security Scan..."
+                              $scanPath = "$(Build.SourcesDirectory)"
+              
+                              if (!(Test-Path $scanPath)) {
+                                Write-Error "Terraform directory not found: $scanPath"
+                                exit 1
+                              }
+              
+                              trivy config --severity HIGH,CRITICAL --exit-code 1 $scanPath
+              
+                              if ($LASTEXITCODE -ne 0) {
+                                Write-Error "Trivy scan failed or vulnerabilities were found."
+                                exit 1
+                              }
+              
+                              Write-Host "Trivy scan completed successfully."
+
+  - stage: initvalidate
+    dependsOn: 
+    - gitleaks
+    - trivy
+    displayName: init validate
+    condition: ${{ parameters.initvalidate }}
+    jobs: 
+      - job: 
+        displayName: init validate
+        steps:
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(workingDirectory)'
+            backendServiceArm: 'Kuldeep9893'
+            backendAzureRmStorageAccountName: 'lalakastorage'
+            backendAzureRmContainerName: 'pappu'
+            backendAzureRmKey: 'ramu.tfstate'
+        
+        
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            workingDirectory: '$(workingDirectory)'
+
+  - stage: plan
+    displayName: plan
+    dependsOn: initvalidate
+    condition: ${{ parameters.runplan}}
+    jobs:
+      - job: 
+        steps:
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(workingDirectory)'
+            backendServiceArm: 'Kuldeep9893'
+            backendAzureRmStorageAccountName: 'lalakastorage'
+            backendAzureRmContainerName: 'pappu'
+            backendAzureRmKey: 'ramu.tfstate'
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceNameAzureRM: 'Kuldeep9893'
+        
+  - stage: manualapproval
+    displayName: manual approval
+    dependsOn: plan
+    condition: ${{ parameters.manualapproval }}
+    jobs:
+      - job: 
+        pool: server
+        displayName: manual approval
+        steps:
+        - task: ManualValidation@1
+          inputs:
+            notifyUsers: 'ywuywudywuw'
+            instructions: 'sdbsdhs'
+
+  - stage: apply
+    displayName: apply
+    dependsOn: manualapproval
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ${{ eq(parameters.runapply, true) }})
+    
+    jobs:
+      - job: 
+        steps:
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(workingDirectory)'
+            backendServiceArm: 'Kuldeep9893'
+            backendAzureRmStorageAccountName: 'lalakastorage'
+            backendAzureRmContainerName: 'pappu'
+            backendAzureRmKey: 'ramu.tfstate'
+        - task: TerraformTask@5
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceNameAzureRM: 'Kuldeep9893'
+  
+
+
